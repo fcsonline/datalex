@@ -20,22 +20,11 @@ mod lexer {
         Ident(String),
         Find, // :find
         Where, // :where
-        Binding(String), // ?p
+        QuestionId(String), // ?p
         Text(String), // "James Cameron"
         Placeholder, // _
-
-        Print,
-
-        Integer(i64),
-        Equals,
-        Plus,
-        Minus,
-        Star,
-        Slash,
         LBracket,
         RBracket,
-        Semi,
-
         Whitespace,
     }
 
@@ -43,32 +32,14 @@ mod lexer {
         fn next_token(text: 'a) -> Token;
 
         r#"[ \t\r\n]+"# => Token::Whitespace,
-
-        r#"print"# => Token::Print,
-
-        r#"[0-9]+"# => {
-            if let Ok(i) = text.parse() {
-                Token::Integer(i)
-            } else {
-                panic!("integer {} is out of range", text)
-            }
-        }
-
+        r#"\["# => Token::LBracket,
+        r#"\]"# => Token::RBracket,
         r#"_"# => Token::Placeholder,
         r#"[a-zA-Z_][a-zA-Z0-9_]*"# => Token::Ident(text.to_owned()),
         r#":find"# => Token::Find,
         r#":where"# => Token::Where,
-        r#"\?[a-zA-Z_][a-zA-Z0-9_]*"# => Token::Binding(text.to_owned()),
+        r#"\?[a-zA-Z_][a-zA-Z0-9_]*"# => Token::QuestionId(text.to_owned()),
         r#"\"[^\"]*\""# => Token::Text(text.to_owned()),
-
-        r#"="# => Token::Equals,
-        r#"\+"# => Token::Plus,
-        r#"-"# => Token::Minus,
-        r#"\*"# => Token::Star,
-        r#"/"# => Token::Slash,
-        r#"\["# => Token::LBracket,
-        r#"\]"# => Token::RBracket,
-        r#";"# => Token::Semi,
 
         r#"."# => panic!("unexpected character: {}", text),
     }
@@ -119,35 +90,29 @@ mod lexer {
 }
 
 mod ast {
-    use lexer::Span;
-
     #[derive(Debug)]
     pub struct Query {
-        pub bindings: Vec<Expr>,
-        pub conditions: Vec<Expr>,
+        pub bindings: Vec<Binding>,
+        pub conditions: Vec<Condition>,
     }
 
     #[derive(Debug)]
-    pub struct Program {
-        pub stmts: Vec<Expr>,
+    pub struct Binding {
+        pub id: String,
     }
 
     #[derive(Debug)]
-    pub struct Expr {
-        pub span: Span,
-        pub node: Expr_,
+    pub struct Condition {
+        pub id: Match,
+        pub attr: Match,
+        pub value: Match
     }
 
     #[derive(Debug)]
-    pub enum Expr_ {
-        Add(Box<Expr>, Box<Expr>),
-        Sub(Box<Expr>, Box<Expr>),
-        Mul(Box<Expr>, Box<Expr>),
-        Div(Box<Expr>, Box<Expr>),
-        Var(String),
-        Assign(String, Box<Expr>),
-        Print(Box<Expr>),
-        Literal(i64),
+    pub enum Match {
+        Placeholder,
+        Binding(String),
+        Value(String)
     }
 }
 
@@ -156,6 +121,7 @@ mod parser {
     use lexer::Token::*;
     use lexer::*;
     use plex::parser;
+
     parser! {
         fn parse_(Token, Span);
 
@@ -167,112 +133,58 @@ mod parser {
             }
         }
 
-        program: Program {
-            statements[s] => Program { stmts: s }
-        }
+        // query: Query {
+        //     LBracket subquery[q] RBracket => q
+        // }
 
-        query: Query {
-            Find fact[lhs] Where atom[rhs] => Query {
-                bindings: vec![],
-                conditions: vec![]
+        subquery: Query {
+            Find bindings[b] Where conditions[c] => Query {
+                bindings: b,
+                conditions: c
             }
         }
 
-        statements: Vec<Expr> {
+        bindings: Vec<Binding> {
             => vec![],
-            statements[mut st] assign[e] Semi => {
-                st.push(e);
-                st
+            bindings[mut bs] binding[b] => {
+                bs.push(b);
+                bs
             }
         }
 
-        assign: Expr {
-            Print assign[a] => Expr {
-                span: span!(),
-                node: Expr_::Print(Box::new(a)),
+        binding: Binding {
+            QuestionId(b) => Binding {
+                id: b
             },
-            Ident(var) Equals assign[rhs] => Expr {
-                span: span!(),
-                node: Expr_::Assign(var, Box::new(rhs)),
-            },
-            term[t] => t,
         }
 
-        term: Expr {
-            term[lhs] Plus fact[rhs] => Expr {
-                span: span!(),
-                node: Expr_::Add(Box::new(lhs), Box::new(rhs)),
-            },
-            term[lhs] Minus fact[rhs] => Expr {
-                span: span!(),
-                node: Expr_::Sub(Box::new(lhs), Box::new(rhs)),
-            },
-            fact[x] => x
+        conditions: Vec<Condition> {
+            => vec![],
+            conditions[mut cs] condition[c] => {
+                cs.push(c);
+                cs
+            }
         }
 
-        fact: Expr {
-            fact[lhs] Star atom[rhs] => Expr {
-                span: span!(),
-                node: Expr_::Mul(Box::new(lhs), Box::new(rhs)),
-            },
-            fact[lhs] Slash atom[rhs] => Expr {
-                span: span!(),
-                node: Expr_::Div(Box::new(lhs), Box::new(rhs)),
-            },
-            atom[x] => x
+        condition: Condition {
+            LBracket mat[id] mat[attr] mat[value] RBracket => Condition {
+                id: id,
+                attr: attr,
+                value: value
+            }
         }
 
-        atom: Expr {
-            // round brackets to destructure tokens
-            Ident(i) => Expr {
-                span: span!(),
-                node: Expr_::Var(i),
-            },
-            Integer(i) => Expr {
-                span: span!(),
-                node: Expr_::Literal(i),
-            },
-            LBracket assign[a] RBracket => a
+        mat: Match {
+            Placeholder => Match::Placeholder,
+            QuestionId(b) => Match::Binding(b),
+            Text(s) => Match::Value(s)
         }
     }
 
     pub fn parse<I: Iterator<Item = (Token, Span)>>(
         i: I,
-    ) -> Result<Program, (Option<(Token, Span)>, &'static str)> {
+    ) -> Result<Query, (Option<(Token, Span)>, &'static str)> {
         parse_(i)
-    }
-}
-
-mod interp {
-    use ast::*;
-    use std::collections::HashMap;
-
-    pub fn interp<'a>(p: &'a Program) {
-        let mut env = HashMap::new();
-        for expr in &p.stmts {
-            interp_expr(&mut env, expr);
-        }
-    }
-    fn interp_expr<'a>(env: &mut HashMap<&'a str, i64>, expr: &'a Expr) -> i64 {
-        use ast::Expr_::*;
-        match expr.node {
-            Add(ref a, ref b) => interp_expr(env, a) - interp_expr(env, b),
-            Sub(ref a, ref b) => interp_expr(env, a) - interp_expr(env, b),
-            Mul(ref a, ref b) => interp_expr(env, a) * interp_expr(env, b),
-            Div(ref a, ref b) => interp_expr(env, a) / interp_expr(env, b),
-            Assign(ref var, ref b) => {
-                let val = interp_expr(env, b);
-                env.insert(var, val);
-                val
-            }
-            Var(ref var) => *env.get(&var[..]).unwrap(),
-            Literal(lit) => lit,
-            Print(ref e) => {
-                let val = interp_expr(env, e);
-                println!("{}", val);
-                val
-            }
-        }
     }
 }
 
@@ -280,6 +192,5 @@ fn main() {
     let mut s = String::new();
     std::io::stdin().read_to_string(&mut s).unwrap();
     let lexer = lexer::Lexer::new(&s).inspect(|tok| eprintln!("tok: {:?}", tok));
-    let program = parser::parse(lexer).unwrap();
-    interp::interp(&program);
+    let _program = parser::parse(lexer).unwrap();
 }

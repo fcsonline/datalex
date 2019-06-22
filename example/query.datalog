@@ -1,0 +1,1 @@
+[:find ?title :where [?p :person/name "James Cameron"] [?m :movie/director ?p] [?m :movie/title ?title] ]
