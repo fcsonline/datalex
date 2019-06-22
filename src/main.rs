@@ -122,6 +122,12 @@ mod ast {
     use lexer::Span;
 
     #[derive(Debug)]
+    pub struct Query {
+        pub bindings: Vec<Expr>,
+        pub conditions: Vec<Expr>,
+    }
+
+    #[derive(Debug)]
     pub struct Program {
         pub stmts: Vec<Expr>,
     }
@@ -138,7 +144,6 @@ mod ast {
         Sub(Box<Expr>, Box<Expr>),
         Mul(Box<Expr>, Box<Expr>),
         Div(Box<Expr>, Box<Expr>),
-        Query(Box<Expr>, Box<Expr>),
         Var(String),
         Assign(String, Box<Expr>),
         Print(Box<Expr>),
@@ -164,6 +169,13 @@ mod parser {
 
         program: Program {
             statements[s] => Program { stmts: s }
+        }
+
+        query: Query {
+            Find fact[lhs] Where atom[rhs] => Query {
+                bindings: vec![],
+                conditions: vec![]
+            }
         }
 
         statements: Vec<Expr> {
@@ -210,13 +222,6 @@ mod parser {
             atom[x] => x
         }
 
-        query: Expr {
-            Find fact[lhs] Where atom[rhs] => Expr {
-                span: span!(),
-                node: Expr_::Query(Box::new(lhs), Box::new(rhs)),
-            }
-        }
-
         atom: Expr {
             // round brackets to destructure tokens
             Ident(i) => Expr {
@@ -255,7 +260,6 @@ mod interp {
             Sub(ref a, ref b) => interp_expr(env, a) - interp_expr(env, b),
             Mul(ref a, ref b) => interp_expr(env, a) * interp_expr(env, b),
             Div(ref a, ref b) => interp_expr(env, a) / interp_expr(env, b),
-            Query(ref a, ref b) => interp_expr(env, a) / interp_expr(env, b),
             Assign(ref var, ref b) => {
                 let val = interp_expr(env, b);
                 env.insert(var, val);
