@@ -32,12 +32,12 @@ mod lexer {
         fn next_token(text: 'a) -> Token;
 
         r#"[ \t\r\n]+"# => Token::Whitespace,
+        r#":find"# => Token::Find,
+        r#":where"# => Token::Where,
         r#"\["# => Token::LBracket,
         r#"\]"# => Token::RBracket,
         r#"_"# => Token::Placeholder,
-        r#"[a-zA-Z_][a-zA-Z0-9_]*"# => Token::Ident(text.to_owned()),
-        r#":find"# => Token::Find,
-        r#":where"# => Token::Where,
+        r#"[a-zA-Z_:][a-zA-Z0-9_\/]*"# => Token::Ident(text.to_owned()),
         r#"\?[a-zA-Z_][a-zA-Z0-9_]*"# => Token::QuestionId(text.to_owned()),
         r#"\"[^\"]*\""# => Token::Text(text.to_owned()),
 
@@ -91,6 +91,11 @@ mod lexer {
 
 mod ast {
     #[derive(Debug)]
+    pub struct Program {
+        pub query: Query
+    }
+
+    #[derive(Debug)]
     pub struct Query {
         pub bindings: Vec<Binding>,
         pub conditions: Vec<Condition>,
@@ -133,11 +138,15 @@ mod parser {
             }
         }
 
-        // query: Query {
-        //     LBracket subquery[q] RBracket => q
-        // }
+        program: Program {
+            inner_query[q] => Program { query: q }
+        }
 
-        subquery: Query {
+        inner_query: Query {
+            LBracket query[q] RBracket => q
+        }
+
+        query: Query {
             Find bindings[b] Where conditions[c] => Query {
                 bindings: b,
                 conditions: c
@@ -177,13 +186,14 @@ mod parser {
         mat: Match {
             Placeholder => Match::Placeholder,
             QuestionId(b) => Match::Binding(b),
+            Ident(i) => Match::Value(i),
             Text(s) => Match::Value(s)
         }
     }
 
     pub fn parse<I: Iterator<Item = (Token, Span)>>(
         i: I,
-    ) -> Result<Query, (Option<(Token, Span)>, &'static str)> {
+    ) -> Result<Program, (Option<(Token, Span)>, &'static str)> {
         parse_(i)
     }
 }
@@ -192,5 +202,14 @@ fn main() {
     let mut s = String::new();
     std::io::stdin().read_to_string(&mut s).unwrap();
     let lexer = lexer::Lexer::new(&s).inspect(|tok| eprintln!("tok: {:?}", tok));
-    let _program = parser::parse(lexer).unwrap();
+    let program: ast::Program = parser::parse(lexer).unwrap();
+    let condition = program.query.conditions.get(0).unwrap();
+
+    let attr = match &condition.attr {
+        ast::Match::Placeholder => "_",
+        ast::Match::Binding(b) => &b,
+        ast::Match::Value(ref s) => s
+    };
+
+    println!("FCS: {}", attr)
 }
